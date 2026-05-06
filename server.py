@@ -60,7 +60,7 @@ async def search_faq(query: str) -> str:
         row = await conn.fetchrow(
             """
             select content, 1 - (embedding <=> $1::vector) as similarity
-            from faq
+            from jaundice_rag
             order by embedding <=> $1::vector
             limit 1
             """,
