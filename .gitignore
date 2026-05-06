@@ -1,0 +1,30 @@
+CLAUDE.md
+CHANGELOG.md
+# 環境變數與機密金鑰 (絕對不能上傳)
+.env
+
+# 已改用 Supabase，本地保留但不上傳
+faq_rows.csv
+faq_rows_new.csv
+test_search.py
+regenerate_embeddings.py
+
+# Python 產生的快取與虛擬環境
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+Pipfile.lock
+
+# 作業系統產生的隱藏檔案
+.DS_Store
+Thumbs.db
+
+# 編輯器與 IDE 設定
+.vscode/
+.idea/
+*.swp
