@@ -3,7 +3,5 @@ uvicorn
 websockets
 python-dotenv
 httpx
-numpy
 openai
-asyncpg
-pgvector
+supabase

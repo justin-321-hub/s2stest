@@ -3,12 +3,11 @@ import json
 import time
 import asyncio
 import logging
-import asyncpg
 import websockets
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket
 from openai import AsyncOpenAI
-from pgvector.asyncpg import register_vector
+from supabase import acreate_client, AsyncClient
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
@@ -17,31 +16,21 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://urzcqkkcrmitcskbgvci.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVyemNxa2tjcm1pdGNza2JndmNpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0MzEwNjk1NywiZXhwIjoyMDU4NjgyOTU3fQ.7k03VTOKS4iuqVnOxlNEu3elfZMz4GbTcqLFUqukrbM")
 EMBEDDING_MODEL = "text-embedding-3-large"
 SIMILARITY_THRESHOLD = 0.5
 
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-db_pool: asyncpg.Pool | None = None
-
-
-async def init_connection(conn):
-    await register_vector(conn)
+supabase_client: AsyncClient | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool
-    db_pool = await asyncpg.create_pool(
-        SUPABASE_DB_URL,
-        min_size=1,
-        max_size=5,
-        init=init_connection,
-        statement_cache_size=0,  # transaction pooler 不支援 prepared statements
-    )
-    logger.info("[db] connection pool ready")
+    global supabase_client
+    supabase_client = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("[db] Supabase client ready")
     yield
-    await db_pool.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -56,26 +45,31 @@ async def search_faq(query: str) -> str:
     query_vec = response.data[0].embedding
     t1 = time.perf_counter()
 
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            select content, 1 - (embedding <=> $1::vector) as similarity
-            from jaundice_rag
-            order by embedding <=> $1::vector
-            limit 1
-            """,
-            query_vec,
-        )
+    result = await supabase_client.rpc(
+        "match_jaundice_rag",
+        {
+            "query_embedding": query_vec,
+            "match_threshold": SIMILARITY_THRESHOLD,
+            "match_count": 1,
+        },
+    ).execute()
     t2 = time.perf_counter()
 
-    similarity = float(row["similarity"])
+    rows = result.data
+    if not rows:
+        logger.info(
+            f"[search] query={query} no match "
+            f"embed={(t1-t0)*1000:.0f}ms db={(t2-t1)*1000:.0f}ms"
+        )
+        return "資料庫中找不到相關資訊。"
+
+    row = rows[0]
+    similarity = float(row.get("similarity", 0))
     logger.info(
         f"[search] query={query} sim={similarity:.4f} "
         f"embed={(t1-t0)*1000:.0f}ms db={(t2-t1)*1000:.0f}ms"
     )
 
-    if similarity < SIMILARITY_THRESHOLD:
-        return "資料庫中找不到相關資訊。"
     return row["content"]
 
 
